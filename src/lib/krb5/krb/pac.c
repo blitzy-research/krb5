@@ -146,8 +146,11 @@ k5_pac_locate_buffer(krb5_context context, const krb5_pac pac, uint32_t type,
     if (buffer == NULL)
         return ENOENT;
 
-    assert(buffer->offset <= pac->data.length);
-    assert(buffer->size <= pac->data.length - buffer->offset);
+    /* Enforce the parser's bounds invariant at runtime so that the returned
+     * view cannot escape the PAC data if assertions are disabled. */
+    if (buffer->offset > pac->data.length ||
+        buffer->size > pac->data.length - buffer->offset)
+        return ERANGE;
 
     if (data_out != NULL)
         *data_out = make_data(pac->data.data + buffer->offset, buffer->size);
@@ -284,9 +287,12 @@ krb5_pac_parse(krb5_context context, const void *ptr, size_t len,
     if (nbuffers < 1 || nbuffers > MAX_BUFFERS)
         return ERANGE;
 
-    header_len = PACTYPE_LENGTH + (nbuffers * PAC_INFO_BUFFER_LENGTH);
-    if (len < header_len)
+    /* Check that the buffer directory fits within the message before
+     * computing its length, so that the multiplication cannot overflow. */
+    if (len < PACTYPE_LENGTH ||
+        nbuffers > (len - PACTYPE_LENGTH) / PAC_INFO_BUFFER_LENGTH)
         return ERANGE;
+    header_len = PACTYPE_LENGTH + (size_t)nbuffers * PAC_INFO_BUFFER_LENGTH;
 
     ret = krb5_pac_init(context, &pac);
     if (ret)
