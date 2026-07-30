@@ -441,6 +441,41 @@ static const unsigned char fuzz2[] = {
     0x20, 0x20
 };
 
+/*
+ * A PAC claiming 4096 buffers (the maximum accepted count) in a 32-byte
+ * message.  The count itself is permissible, so this exercises the check that
+ * the buffer directory fits within the message: 8 + 4096 * 16 far exceeds 32.
+ */
+static const unsigned char overflow_hdr[] = {
+    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+/*
+ * A PAC claiming two buffers in a 39-byte message, so that the second
+ * directory entry is truncated: 8 + 2 * 16 = 40 > 39.
+ */
+static const unsigned char short_hdr[] = {
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+/*
+ * A valid 24-byte PAC containing a single logon-info buffer of zero length,
+ * placed at offset 24 so that its offset equals the message length.  This
+ * boundary must remain acceptable (ticket 9144).
+ */
+static const unsigned char zero_len_trailing[] = {
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
 static const char *s4u_principal = "w2k8u@ACME.COM";
 static const char *s4u_enterprise = "w2k8u@abc@ACME.COM";
 
@@ -876,6 +911,30 @@ main(int argc, char **argv)
     ret = krb5_pac_parse(context, fuzz2, sizeof(fuzz2), &pac);
     if (!ret)
         err(context, ret, "krb5_pac_parse should have failed");
+
+    /* Check PACs whose buffer directory does not fit within the message. */
+    ret = krb5_pac_parse(context, overflow_hdr, sizeof(overflow_hdr), &pac);
+    if (!ret)
+        err(context, ret, "krb5_pac_parse should have failed");
+    ret = krb5_pac_parse(context, short_hdr, sizeof(short_hdr), &pac);
+    if (!ret)
+        err(context, ret, "krb5_pac_parse should have failed");
+
+    /*
+     * Check that a buffer whose offset equals the length of the PAC data is
+     * still within bounds, and that its empty contents can be retrieved.
+     */
+    ret = krb5_pac_parse(context, zero_len_trailing, sizeof(zero_len_trailing),
+                         &pac);
+    if (ret)
+        err(context, ret, "krb5_pac_parse");
+    ret = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &data);
+    if (ret)
+        err(context, ret, "krb5_pac_get_buffer");
+    if (data.length != 0)
+        err(context, 0, "zero-length PAC buffer should have length 0");
+    krb5_free_data_contents(context, &data);
+    krb5_pac_free(context, pac);
 
     /*
      * Test empty free
