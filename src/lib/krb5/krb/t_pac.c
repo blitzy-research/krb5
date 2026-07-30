@@ -441,6 +441,27 @@ static const unsigned char fuzz2[] = {
     0x20, 0x20
 };
 
+static const unsigned char overflow_hdr[] = {
+    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const unsigned char short_hdr[] = {
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const unsigned char zero_len_trailing[] = {
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
 static const char *s4u_principal = "w2k8u@ACME.COM";
 static const char *s4u_enterprise = "w2k8u@abc@ACME.COM";
 
@@ -876,6 +897,25 @@ main(int argc, char **argv)
     ret = krb5_pac_parse(context, fuzz2, sizeof(fuzz2), &pac);
     if (!ret)
         err(context, ret, "krb5_pac_parse should have failed");
+
+    ret = krb5_pac_parse(context, overflow_hdr, sizeof(overflow_hdr), &pac);
+    if (!ret)
+        err(context, ret, "krb5_pac_parse should have failed");
+    ret = krb5_pac_parse(context, short_hdr, sizeof(short_hdr), &pac);
+    if (!ret)
+        err(context, ret, "krb5_pac_parse should have failed");
+
+    ret = krb5_pac_parse(context, zero_len_trailing, sizeof(zero_len_trailing),
+                         &pac);
+    if (ret)
+        err(context, ret, "krb5_pac_parse");
+    ret = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &data);
+    if (ret)
+        err(context, ret, "krb5_pac_get_buffer");
+    if (data.length != 0)
+        err(context, 0, "zero-length PAC buffer should have length 0");
+    krb5_free_data_contents(context, &data);
+    krb5_pac_free(context, pac);
 
     /*
      * Test empty free
